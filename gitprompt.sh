@@ -1,16 +1,26 @@
 #!/bin/sh
 
-# assume the gitstatus.py is in the same directory as this script
-# code thanks to http://stackoverflow.com/questions/59895
-if [ -z "${__GIT_PROMPT_DIR}" ]; then
-  SOURCE="${BASH_SOURCE[0]}"
-  while [ -h "${SOURCE}" ]; do
-    DIR="$( cd -P "$( dirname "${SOURCE}" )" && pwd )"
-    SOURCE="$(readlink "${SOURCE}")"
-    [[ $SOURCE != /* ]] && SOURCE="${DIR}/${SOURCE}"
-  done
-  __GIT_PROMPT_DIR="$( cd -P "$( dirname "${SOURCE}" )" && pwd )"
-fi
+function async_run()
+{
+  {
+    $1 &> /dev/null
+  }&
+}
+
+function git_prompt_dir()
+{
+  # assume the gitstatus.py is in the same directory as this script
+  # code thanks to http://stackoverflow.com/questions/59895
+  if [ -z "${__GIT_PROMPT_DIR}" ]; then
+    local SOURCE="${BASH_SOURCE[0]}"
+    while [ -h "${SOURCE}" ]; do
+      local DIR="$( cd -P "$( dirname "${SOURCE}" )" && pwd )"
+      SOURCE="$(readlink "${SOURCE}")"
+      [[ $SOURCE != /* ]] && SOURCE="${DIR}/${SOURCE}"
+    done
+    __GIT_PROMPT_DIR="$( cd -P "$( dirname "${SOURCE}" )" && pwd )"
+  fi
+}
 
 function git_prompt_config()
 {
@@ -31,7 +41,7 @@ function git_prompt_config()
   local Yellow="\[\033[0;33m\]"
   local White='\[\033[37m\]'
   local Red="\[\033[0;31m\]"
-  Blue="\[\033[0;34m\]"
+  local Blue="\[\033[0;34m\]"
 
   # Default values for the appearance of the prompt. Configure at will.
   GIT_PROMPT_PREFIX="["
@@ -63,18 +73,50 @@ function git_prompt_config()
     PROMPT_END="${GIT_PROMPT_END}"
   fi
 
-  EMPTY_PROMPT="${PROMPT_START}${PROMPT_END}"
+  EMPTY_PROMPT="${PROMPT_START}$($prompt_callback)${PROMPT_END}"
 
   # fetch remote revisions every other $GIT_PROMPT_FETCH_TIMEOUT (default 5) minutes
   GIT_PROMPT_FETCH_TIMEOUT=${1-5}
   if [ "x$__GIT_STATUS_CMD" == "x" ]
   then
-    __GIT_STATUS_CMD="${__GIT_PROMPT_DIR:-${HOME}/.bash}/gitstatus.py"
+    git_prompt_dir
+    __GIT_STATUS_CMD="${__GIT_PROMPT_DIR}/gitstatus.py"
   fi
 }
 
 function setGitPrompt() {
 
+  local EMPTY_PROMPT
+  local __GIT_STATUS_CMD
+
+  git_prompt_config
+
+  local repo=`git rev-parse --show-toplevel 2> /dev/null`
+  if [[ ! -e "${repo}" ]]; then
+    PS1="${EMPTY_PROMPT}"
+    return
+  fi
+
+  checkUpstream
+  updatePrompt
+}
+
+function checkUpstream() {
+  local GIT_PROMPT_FETCH_TIMEOUT
+  git_prompt_config
+
+  local FETCH_HEAD="${repo}/.git/FETCH_HEAD"
+  # Fech repo if local is stale for more than $GIT_FETCH_TIMEOUT minutes
+  if [[ ! -e "${FETCH_HEAD}"  ||  -e `find "${FETCH_HEAD}" -mmin +${GIT_PROMPT_FETCH_TIMEOUT}` ]]
+  then
+    if [[ -n $(git remote show) ]]; then
+      async_run "git fetch --quiet"
+      disown
+    fi
+  fi
+}
+
+function updatePrompt() {
   local GIT_PROMPT_PREFIX
   local GIT_PROMPT_SUFFIX
   local GIT_PROMPT_SEPARATOR
@@ -107,7 +149,6 @@ function setGitPrompt() {
 	then
         git fetch --quiet
 	fi
-
   local -a GitStatus
   GitStatus=($("${__GIT_STATUS_CMD}" 2>/dev/null))
 
@@ -157,13 +198,26 @@ function setGitPrompt() {
   else
     PS1="${EMPTY_PROMPT}"
   fi
-  export PS1
 }
 
-PROMPT_COMMAND="$PROMPT_COMMAND setGitPrompt"
-#if [ -z "$PROMPT_COMMAND" ]; then
-#  PROMPT_COMMAND=setGitPrompt
-#else
-#  PROMPT_COMMAND="$PROMPT_COMMAND;setGitPrompt"
-#fi
+function prompt_callback_default {
+    return
+}
 
+if [ "`type -t prompt_callback`" = 'function' ]; then
+    prompt_callback="prompt_callback"
+else
+    prompt_callback="prompt_callback_default"
+fi
+
+if [ -z "$OLD_GITPROMPT" ]; then
+  OLD_GITPROMPT=$PS1
+fi
+
+if [ -z "$PROMPT_COMMAND" ]; then
+  PROMPT_COMMAND=setGitPrompt
+else
+  PROMPT_COMMAND=${PROMPT_COMMAND%% }; # remove trailing spaces
+  PROMPT_COMMAND=${PROMPT_COMMAND%\;}; # remove trailing semi-colon
+  PROMPT_COMMAND="$PROMPT_COMMAND;setGitPrompt"
+fi

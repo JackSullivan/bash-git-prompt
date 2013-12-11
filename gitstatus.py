@@ -1,8 +1,38 @@
 #!/usr/bin/env python
 # -*- coding: UTF-8 -*-
 
-from __future__ import print_function
+"""This module defines a Print function to use with python 2.x or 3.x., so we can use the prompt with older versions of Python too
 
+It's interface is that of python 3.0's print. See
+http://docs.python.org/3.0/library/functions.html?highlight=print#print
+
+Shamelessly ripped from http://www.daniweb.com/software-development/python/code/217214/a-print-function-for-different-versions-of-python
+"""
+
+__all__ = ["Print"]
+import sys
+try:
+  Print = eval("print") # python 3.0 case
+except SyntaxError:
+  try:
+    D = dict()
+    exec("from __future__ import print_function\np=print", D)
+    Print = D["p"] # 2.6 case
+    del D
+  except SyntaxError:
+    del D
+    def Print(*args, **kwd): # 2.4, 2.5, define our own Print function
+      fout = kwd.get("file", sys.stdout)
+      w = fout.write
+      if args:
+        w(str(args[0]))
+        sep = kwd.get("sep", " ")
+        for a in args[1:]:
+          w(sep)
+          w(str(a))
+      w(kwd.get("end", "\n"))
+      
+      
 # change those symbols to whatever you prefer
 symbols = {'ahead of': '↑·', 'behind': '↓·', 'prehash':':'}
 
@@ -31,7 +61,9 @@ nb_staged = len(staged_files) - nb_U
 staged = str(nb_staged)
 conflicts = str(nb_U)
 changed = str(nb_changed)
-nb_untracked = len(Popen(['git','ls-files','--others','--exclude-standard'],stdout=PIPE).communicate()[0].splitlines())
+status_lines = Popen(['git','status','-s','-uall'],stdout=PIPE).communicate()[0].splitlines()
+untracked_lines = [a for a in status_lines if a.startswith("??")]
+nb_untracked = len(untracked_lines)
 untracked = str(nb_untracked)
 if not nb_changed and not nb_staged and not nb_U and not nb_untracked:
 	clean = '1'
@@ -43,10 +75,10 @@ remote = ''
 tag, tag_error = Popen(['git', 'describe', '--exact-match'], stdout=PIPE, stderr=PIPE).communicate()
 
 if not branch: # not on any branch
-  if tag: # if we are on a tag, print the tag's name
-    branch = tag
-  else:
-	  branch = symbols['prehash']+ Popen(['git','rev-parse','--short','HEAD'], stdout=PIPE).communicate()[0][:-1]
+	if tag: # if we are on a tag, print the tag's name
+		branch = tag
+	else:
+		branch = symbols['prehash']+ Popen(['git','rev-parse','--short','HEAD'], stdout=PIPE).communicate()[0][:-1]
 else:
 	remote_name = Popen(['git','config','branch.%s.remote' % branch], stdout=PIPE).communicate()[0].strip()
 	if remote_name:
@@ -82,4 +114,4 @@ out = '\n'.join([
 	changed,
 	untracked,
 	clean])
-print(out)
+Print(out)
